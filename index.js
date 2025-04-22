@@ -15,8 +15,5 @@ mongoose.connect(process.env.MONGODB_URI)
 // Đăng ký route cho Facebook Auth
 app.use("/api/facebook-auth", require("./routes/facebookAuth"));
 
-// Đảm bảo rằng bạn có thêm route khác nếu cần
-// Ví dụ: app.use("/api/other-route", require("./routes/otherRoute"));
-
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`🚀 Server at http://localhost:${PORT}`));

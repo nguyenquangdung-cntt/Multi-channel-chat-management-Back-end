@@ -6,6 +6,8 @@ const User = require("../models/User");
 router.post("/", async (req, res) => {
   const { userID, accessToken, userInfo, pageID, pageAccessToken } = req.body;
 
+  console.log("Request Body:", req.body);  // Log the incoming data for debugging
+
   try {
     const user = await User.findOneAndUpdate(
       { userID },
@@ -17,28 +19,31 @@ router.post("/", async (req, res) => {
         pageID,
         pageAccessToken,
       },
-      { upsert: true, new: true }
+      { upsert: true, new: true } // upsert ensures if user doesn't exist, it'll be created
     );
+
+    console.log("Saved User:", user); // Log saved user for debugging
 
     res.json({ message: "Saved successfully", user });
   } catch (err) {
-    console.error("DB Error:", err);
+    console.error("DB Error:", err);  // Log error for debugging
     res.status(500).json({ error: "Error saving user" });
   }
 });
 
-// Get user
+// Get user by userID
 router.get("/:userID", async (req, res) => {
   try {
     const user = await User.findOne({ userID: req.params.userID });
     if (!user) return res.status(404).json({ message: "User not found" });
     res.json(user);
   } catch (err) {
+    console.error("Error retrieving user:", err);  // Log error for debugging
     res.status(500).json({ error: "Error retrieving user" });
   }
 });
 
-// Gửi tin nhắn từ page
+// Send message from page
 router.post("/send-message", async (req, res) => {
   const { userID, recipientId, message } = req.body;
 
@@ -48,8 +53,9 @@ router.post("/send-message", async (req, res) => {
       return res.status(400).json({ error: "Page token or ID missing" });
     }
 
+    // Make API call to Facebook Graph API to send message
     const fbRes = await fetch(
-      `https://graph.facebook.com/v19.0/${user.pageID}/messages`,
+      `https://graph.facebook.com/v19.0/me/messages?access_token=${user.pageAccessToken}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -57,7 +63,6 @@ router.post("/send-message", async (req, res) => {
           recipient: { id: recipientId },
           message: { text: message },
           messaging_type: "RESPONSE",
-          access_token: user.pageAccessToken,
         }),
       }
     );
@@ -68,7 +73,7 @@ router.post("/send-message", async (req, res) => {
 
     res.json({ message: "Message sent", data });
   } catch (error) {
-    console.error("Send message error:", error);
+    console.error("Send message error:", error); // Log error for debugging
     res.status(500).json({ error: "Failed to send message" });
   }
 });

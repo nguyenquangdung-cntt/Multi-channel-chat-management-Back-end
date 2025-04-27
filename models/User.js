@@ -4,10 +4,11 @@ const userSchema = new mongoose.Schema(
   {
     userID: { type: String, required: true, unique: true },
     accessToken: { type: String, required: true },
-    pageAccessToken: { type: String }, // Trường này lưu Access Token của Facebook Page
+    pageAccessToken: { type: String },
     name: { type: String },
     email: { type: String },
     picture: { type: String },
+    pageID: { type: String },
   },
   { timestamps: true }
 );

@@ -1,7 +1,9 @@
 const express = require("express");
 const router = express.Router();
 const User = require("../models/User");
-const fetch = require("node-fetch"); // 🛠️ thêm fetch nếu chưa có
+const fetch = require("node-fetch");
+
+const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "s3cr3tWebhookToken"; // 🔥 lấy từ env nếu có
 
 // Save user info + page token
 router.post("/", async (req, res) => {
@@ -58,7 +60,7 @@ router.post("/send-message", async (req, res) => {
           recipient: { id: recipientId },
           message: { text: message },
           messaging_type: "MESSAGE_TAG",
-          tag: "ACCOUNT_UPDATE", 
+          tag: "ACCOUNT_UPDATE",
         }),
       }
     );
@@ -82,8 +84,10 @@ router.get("/webhook", (req, res) => {
   const token = req.query["hub.verify_token"];
   const challenge = req.query["hub.challenge"];
 
-  if (mode === "subscribe" && token === process.env.VERIFY_TOKEN) {
-    console.log("✅ Webhook verified!");
+  console.log("Webhook Verification Attempt:", { mode, token });
+
+  if (mode === "subscribe" && token === VERIFY_TOKEN) {
+    console.log("✅ Webhook verified successfully!");
     res.status(200).send(challenge);
   } else {
     console.warn("❌ Webhook verification failed");
@@ -91,14 +95,15 @@ router.get("/webhook", (req, res) => {
   }
 });
 
-// Webhook nhận tin nhắn
+// Webhook nhận tin nhắn từ Facebook
 router.post("/webhook", async (req, res) => {
   const body = req.body;
 
   if (body.object === "page") {
     for (const entry of body.entry) {
       const event = entry.messaging?.[0];
-      if (event && event.message && event.sender) {
+
+      if (event?.message && event?.sender) {
         const senderId = event.sender.id;
         const messageText = event.message.text;
 
@@ -114,12 +119,14 @@ router.post("/webhook", async (req, res) => {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                   recipient: { id: senderId },
-                  message: { text: `Bot received: ${messageText}` },
-                  messaging_type: "MESSAGE_TAG",
-                  tag: "ACCOUNT_UPDATE",
+                  message: { text: `🤖 Bot received: "${messageText}"` },
+                  messaging_type: "RESPONSE",
                 }),
               }
             );
+            console.log("✅ Auto reply sent");
+          } else {
+            console.warn("⚠️ Page Access Token not found for this page");
           }
         } catch (err) {
           console.error("❌ Error sending auto reply:", err);

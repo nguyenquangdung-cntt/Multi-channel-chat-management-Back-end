@@ -3,11 +3,11 @@ const router = express.Router();
 const User = require("../models/User");
 const fetch = require("node-fetch");
 
-const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "s3cr3tWebhookToken"; // 🔥 lấy từ env nếu có
+const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "s3cr3tWebhookToken";
 
-// Save user info + page token
+// Save user info + all pages
 router.post("/", async (req, res) => {
-  const { userID, accessToken, userInfo, pageID, pageAccessToken } = req.body;
+  const { userID, accessToken, userInfo, pages } = req.body;
 
   try {
     const user = await User.findOneAndUpdate(
@@ -17,8 +17,7 @@ router.post("/", async (req, res) => {
         name: userInfo.name,
         email: userInfo.email,
         picture: userInfo.picture?.data?.url || "",
-        pageID,
-        pageAccessToken,
+        pages: pages || [],
       },
       { upsert: true, new: true }
     );
@@ -78,24 +77,21 @@ router.post("/send-message", async (req, res) => {
   }
 });
 
-// Webhook xác thực từ Meta (verify)
+// Webhook xác thực
 router.get("/webhook", (req, res) => {
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
   const challenge = req.query["hub.challenge"];
 
-  console.log("Webhook Verification Attempt:", { mode, token });
-
   if (mode === "subscribe" && token === VERIFY_TOKEN) {
     console.log("✅ Webhook verified successfully!");
     res.status(200).send(challenge);
   } else {
-    console.warn("❌ Webhook verification failed");
     res.sendStatus(403);
   }
 });
 
-// Webhook nhận tin nhắn từ Facebook
+// Webhook nhận tin nhắn
 router.post("/webhook", async (req, res) => {
   const body = req.body;
 

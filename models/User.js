@@ -4,11 +4,17 @@ const userSchema = new mongoose.Schema(
   {
     userID: { type: String, required: true, unique: true },
     accessToken: { type: String, required: true },
-    pageAccessToken: { type: String },
     name: { type: String },
     email: { type: String },
     picture: { type: String },
-    pageID: { type: String },
+    pages: [
+      {
+        id: { type: String },
+        name: { type: String },
+        access_token: { type: String },
+        category: { type: String },
+      }
+    ],
   },
   { timestamps: true }
 );

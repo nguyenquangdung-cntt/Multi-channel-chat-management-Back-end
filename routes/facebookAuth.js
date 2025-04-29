@@ -1,11 +1,12 @@
 const express = require("express");
 const router = express.Router();
 const User = require("../models/User");
+const Message = require("../models/Message");
 const fetch = require("node-fetch");
 
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "s3cr3tWebhookToken";
 
-// Save user info + all pages
+// Lưu user và pages
 router.post("/", async (req, res) => {
   const { userID, accessToken, userInfo, pages } = req.body;
 
@@ -28,7 +29,7 @@ router.post("/", async (req, res) => {
   }
 });
 
-// Get user by ID
+// Lấy user theo userID
 router.get("/:userID", async (req, res) => {
   try {
     const user = await User.findOne({ userID: req.params.userID });
@@ -40,18 +41,19 @@ router.get("/:userID", async (req, res) => {
   }
 });
 
-// Gửi tin nhắn từ Fanpage
+// Gửi tin nhắn từ page đến user
 router.post("/send-message", async (req, res) => {
-  const { userID, recipientId, message } = req.body;
+  const { userID, recipientId, message, pageID } = req.body;
 
   try {
     const user = await User.findOne({ userID });
-    if (!user?.pageAccessToken || !user?.pageID) {
-      return res.status(400).json({ error: "Page token or ID missing" });
-    }
+    if (!user) return res.status(404).json({ error: "User not found" });
 
-    const fbRes = await fetch(
-      `https://graph.facebook.com/v19.0/${user.pageID}/messages`,
+    const page = user.pages.find((p) => p.id === pageID);
+    if (!page) return res.status(404).json({ error: "Page not found" });
+
+    const response = await fetch(
+      `https://graph.facebook.com/v19.0/${page.id}/messages`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -60,79 +62,96 @@ router.post("/send-message", async (req, res) => {
           message: { text: message },
           messaging_type: "MESSAGE_TAG",
           tag: "ACCOUNT_UPDATE",
+          access_token: page.access_token,
         }),
       }
     );
 
-    const data = await fbRes.json();
-    if (data.error) {
-      console.error("FB API Error:", data.error);
-      return res.status(400).json({ error: data.error });
+    const result = await response.json();
+
+    if (result.error) {
+      console.error("FB API Error:", result.error);
+      return res.status(400).json({ error: result.error.message });
     }
 
-    res.json({ message: "Message sent successfully", data });
+    // Lưu tin nhắn gửi
+    await Message.create({
+      senderId: page.id,
+      recipientId,
+      message,
+      direction: "out",
+      pageID: page.id,
+    });
+
+    res.json({ message: "Sent successfully", result });
   } catch (error) {
-    console.error("Send message error:", error);
+    console.error("Send error:", error);
     res.status(500).json({ error: "Failed to send message" });
   }
 });
 
-// Webhook xác thực
+// Webhook verify (GET)
 router.get("/webhook", (req, res) => {
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
   const challenge = req.query["hub.challenge"];
 
   if (mode === "subscribe" && token === VERIFY_TOKEN) {
-    console.log("✅ Webhook verified successfully!");
-    res.status(200).send(challenge);
-  } else {
-    res.sendStatus(403);
+    console.log("✅ Webhook verified");
+    return res.status(200).send(challenge);
   }
+  res.sendStatus(403);
 });
 
-// Webhook nhận tin nhắn
+// Webhook nhận tin nhắn từ page (POST)
 router.post("/webhook", async (req, res) => {
   const body = req.body;
 
-  if (body.object === "page") {
+  if (body.object !== "page") return res.sendStatus(404);
+
+  try {
     for (const entry of body.entry) {
-      const event = entry.messaging?.[0];
+      const messaging = entry.messaging?.[0];
 
-      if (event?.message && event?.sender) {
-        const senderId = event.sender.id;
-        const messageText = event.message.text;
+      if (messaging?.message && messaging.sender) {
+        const senderId = messaging.sender.id;
+        const messageText = messaging.message.text;
 
-        console.log(`📩 Message from ${senderId}: ${messageText}`);
+        const user = await User.findOne({ "pages.id": entry.id });
+        const page = user?.pages.find((p) => p.id === entry.id);
 
-        try {
-          const user = await User.findOne({ pageID: entry.id });
-          if (user?.pageAccessToken) {
-            await fetch(
-              `https://graph.facebook.com/v19.0/${user.pageID}/messages`,
-              {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  recipient: { id: senderId },
-                  message: { text: `🤖 Bot received: "${messageText}"` },
-                  messaging_type: "RESPONSE",
-                }),
-              }
-            );
-            console.log("✅ Auto reply sent");
-          } else {
-            console.warn("⚠️ Page Access Token not found for this page");
-          }
-        } catch (err) {
-          console.error("❌ Error sending auto reply:", err);
+        // Lưu message nhận được
+        await Message.create({
+          senderId,
+          recipientId: entry.id,
+          message: messageText,
+          direction: "in",
+          pageID: entry.id,
+        });
+
+        // Trả lời tin nhắn tự động
+        if (page?.access_token) {
+          await fetch(`https://graph.facebook.com/v19.0/${entry.id}/messages`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              recipient: { id: senderId },
+              message: { text: `🤖 Bot đã nhận: "${messageText}"` },
+              messaging_type: "RESPONSE",
+              access_token: page.access_token,
+            }),
+          });
+          console.log("✅ Auto-replied");
+        } else {
+          console.warn("⚠️ Missing page access token");
         }
       }
     }
 
     res.status(200).send("EVENT_RECEIVED");
-  } else {
-    res.sendStatus(404);
+  } catch (err) {
+    console.error("Webhook error:", err);
+    res.status(500).send("Internal error");
   }
 });
 

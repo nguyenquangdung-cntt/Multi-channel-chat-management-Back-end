@@ -4,8 +4,6 @@ const User = require("../models/User");
 const Message = require("../models/Message");
 const fetch = require("node-fetch");
 
-const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "s3cr3tWebhookToken";
-
 // Lưu user và pages
 router.post("/", async (req, res) => {
   const { userID, accessToken, userInfo, pages } = req.body;
@@ -41,117 +39,68 @@ router.get("/:userID", async (req, res) => {
   }
 });
 
-// Gửi tin nhắn từ page đến user
-router.post("/send-message", async (req, res) => {
-  const { userID, recipientId, message, pageID } = req.body;
+// Lấy danh sách senders từ các conversation của 1 page và lưu vào MongoDB
+router.get("/:userID/:pageID/senders", async (req, res) => {
+  const { userID, pageID } = req.params;
 
   try {
     const user = await User.findOne({ userID });
     if (!user) return res.status(404).json({ error: "User not found" });
 
     const page = user.pages.find((p) => p.id === pageID);
-    if (!page) return res.status(404).json({ error: "Page not found" });
+    if (!page) return res.status(404).json({ error: "Page not found in user's pages" });
 
-    const response = await fetch(
-      `https://graph.facebook.com/v19.0/${page.id}/messages`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          recipient: { id: recipientId },
-          message: { text: message },
-          messaging_type: "MESSAGE_TAG",
-          tag: "ACCOUNT_UPDATE",
-          access_token: page.access_token,
-        }),
-      }
-    );
+    const accessToken = page.access_token;
+    const conversationURL = `https://graph.facebook.com/v19.0/${pageID}/conversations?access_token=${accessToken}`;
 
-    const result = await response.json();
+    const convoRes = await fetch(conversationURL);
+    const convoData = await convoRes.json();
 
-    if (result.error) {
-      console.error("FB API Error:", result.error);
-      return res.status(400).json({ error: result.error.message });
+    if (convoData.error) {
+      console.error("Conversation API error:", convoData.error);
+      return res.status(500).json({ error: convoData.error.message });
     }
 
-    // Lưu tin nhắn gửi
-    await Message.create({
-      senderId: page.id,
-      recipientId,
-      message,
-      direction: "out",
-      pageID: page.id,
-    });
+    const result = [];
 
-    res.json({ message: "Sent successfully", result });
-  } catch (error) {
-    console.error("Send error:", error);
-    res.status(500).json({ error: "Failed to send message" });
-  }
-});
+    for (const convo of convoData.data || []) {
+      const messagesURL = `https://graph.facebook.com/v19.0/${convo.id}/messages?fields=from&access_token=${accessToken}`;
+      const msgRes = await fetch(messagesURL);
+      const msgData = await msgRes.json();
 
-// Webhook verify (GET)
-router.get("/webhook", (req, res) => {
-  const mode = req.query["hub.mode"];
-  const token = req.query["hub.verify_token"];
-  const challenge = req.query["hub.challenge"];
-
-  if (mode === "subscribe" && token === VERIFY_TOKEN) {
-    console.log("✅ Webhook verified");
-    return res.status(200).send(challenge);
-  }
-  res.sendStatus(403);
-});
-
-// Webhook nhận tin nhắn từ page (POST)
-router.post("/webhook", async (req, res) => {
-  const body = req.body;
-
-  if (body.object !== "page") return res.sendStatus(404);
-
-  try {
-    for (const entry of body.entry) {
-      const messaging = entry.messaging?.[0];
-
-      if (messaging?.message && messaging.sender) {
-        const senderId = messaging.sender.id;
-        const messageText = messaging.message.text;
-
-        const user = await User.findOne({ "pages.id": entry.id });
-        const page = user?.pages.find((p) => p.id === entry.id);
-
-        // Lưu message nhận được
-        await Message.create({
-          senderId,
-          recipientId: entry.id,
-          message: messageText,
-          direction: "in",
-          pageID: entry.id,
-        });
-
-        // Trả lời tin nhắn tự động
-        if (page?.access_token) {
-          await fetch(`https://graph.facebook.com/v19.0/${entry.id}/messages`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              recipient: { id: senderId },
-              message: { text: `🤖 Bot đã nhận: "${messageText}"` },
-              messaging_type: "RESPONSE",
-              access_token: page.access_token,
-            }),
-          });
-          console.log("✅ Auto-replied");
-        } else {
-          console.warn("⚠️ Missing page access token");
-        }
+      if (msgData.error) {
+        console.warn(`Error fetching messages for ${convo.id}:`, msgData.error.message);
+        continue;
       }
+
+      const senders = msgData.data?.map((msg) => msg.from) || [];
+
+      // Lưu vào MongoDB
+      for (const sender of senders) {
+        if (!sender || !sender.id) continue;
+        await Message.findOneAndUpdate(
+          { conversationID: convo.id, senderID: sender.id },
+          {
+            userID,
+            pageID,
+            conversationID: convo.id,
+            senderID: sender.id,
+            senderName: sender.name || "",
+          },
+          { upsert: true, new: true }
+        );
+      }
+
+      result.push({
+        conversationID: convo.id,
+        senders,
+      });
     }
 
-    res.status(200).send("EVENT_RECEIVED");
+    res.json(result);
   } catch (err) {
-    console.error("Webhook error:", err);
-    res.status(500).send("Internal error");
+    console.error("Error fetching senders:", err);
+    res.status(500).json({ error: "Failed to fetch and save senders" });
   }
 });
 

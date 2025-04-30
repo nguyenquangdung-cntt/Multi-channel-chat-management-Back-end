@@ -1,12 +1,12 @@
+// models/Message.js
 const mongoose = require("mongoose");
 
-const messageSchema = new mongoose.Schema({
-  senderId: String,
-  recipientId: String,
-  message: String,
-  direction: { type: String, enum: ["in", "out"] },
+const MessageSchema = new mongoose.Schema({
+  userID: String,
   pageID: String,
-  timestamp: { type: Date, default: Date.now },
-});
+  conversationID: String,
+  senderID: String,
+  senderName: String,
+}, { timestamps: true });
 
-module.exports = mongoose.models.Message || mongoose.model("Message", messageSchema);
+module.exports = mongoose.model("Message", MessageSchema);

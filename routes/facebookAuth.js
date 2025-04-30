@@ -64,7 +64,7 @@ router.get("/:userID/:pageID/senders", async (req, res) => {
     const result = [];
 
     for (const convo of convoData.data || []) {
-      const messagesURL = `https://graph.facebook.com/v19.0/${convo.id}/messages?fields=from&access_token=${accessToken}`;
+      const messagesURL = `https://graph.facebook.com/v19.0/${convo.id}/messages?fields=from,message&access_token=${accessToken}`;
       const msgRes = await fetch(messagesURL);
       const msgData = await msgRes.json();
 
@@ -73,19 +73,24 @@ router.get("/:userID/:pageID/senders", async (req, res) => {
         continue;
       }
 
-      const senders = msgData.data?.map((msg) => msg.from) || [];
+      const messages = msgData.data || [];
 
-      // Lưu vào MongoDB
-      for (const sender of senders) {
-        if (!sender || !sender.id) continue;
+      for (const msg of messages) {
+        if (!msg.from || !msg.from.id || !msg.message) continue;
+
         await Message.findOneAndUpdate(
-          { conversationID: convo.id, senderID: sender.id },
+          {
+            conversationID: convo.id,
+            senderID: msg.from.id,
+            message: msg.message,
+          },
           {
             userID,
             pageID,
             conversationID: convo.id,
-            senderID: sender.id,
-            senderName: sender.name || "",
+            senderID: msg.from.id,
+            senderName: msg.from.name || "",
+            message: msg.message,
           },
           { upsert: true, new: true }
         );
@@ -93,14 +98,14 @@ router.get("/:userID/:pageID/senders", async (req, res) => {
 
       result.push({
         conversationID: convo.id,
-        senders,
+        messages,
       });
     }
 
     res.json(result);
   } catch (err) {
     console.error("Error fetching senders:", err);
-    res.status(500).json({ error: "Failed to fetch and save senders" });
+    res.status(500).json({ error: "Failed to fetch and save senders/messages" });
   }
 });
 

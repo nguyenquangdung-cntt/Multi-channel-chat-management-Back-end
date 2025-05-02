@@ -109,4 +109,47 @@ router.get("/:userID/:pageID/senders", async (req, res) => {
   }
 });
 
+// Gửi tin nhắn đến một người dùng từ một Page
+router.post("/:userID/:pageID/send-message", async (req, res) => {
+  const { userID, pageID } = req.params;
+  const { recipientID, message } = req.body;
+
+  if (!recipientID || !message) {
+    return res.status(400).json({ error: "Missing recipientID or message" });
+  }
+
+  try {
+    const user = await User.findOne({ userID });
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    const page = user.pages.find((p) => p.id === pageID);
+    if (!page) return res.status(404).json({ error: "Page not found in user's pages" });
+
+    const accessToken = page.access_token;
+
+    const fbRes = await fetch(`https://graph.facebook.com/v19.0/me/messages?access_token=${accessToken}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        recipient: { id: recipientID },
+        message: { text: message },
+      }),
+    });
+
+    const fbData = await fbRes.json();
+
+    if (!fbRes.ok) {
+      console.error("Facebook API error:", fbData.error);
+      return res.status(fbRes.status).json({ error: fbData.error.message });
+    }
+
+    res.json({ success: true, response: fbData });
+  } catch (err) {
+    console.error("Send message error:", err);
+    res.status(500).json({ error: "Failed to send message" });
+  }
+});
+
 module.exports = router;

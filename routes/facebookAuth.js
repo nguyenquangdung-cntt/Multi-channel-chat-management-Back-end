@@ -82,7 +82,7 @@ router.get("/:userID/:pageID/senders", async (req, res) => {
         if (!msg.from || !msg.from.id || !msg.message) continue;
 
         // Kiểm tra có phải mới không (tránh gửi socket 2 lần)
-        const existed = await Message.exists({
+        const existed = await Message.findOne({
           conversationID: convo.id,
           senderID: msg.from.id,
           message: msg.message,
@@ -106,7 +106,7 @@ router.get("/:userID/:pageID/senders", async (req, res) => {
           { upsert: true, new: true }
         );
 
-        // Nếu là tin nhắn của user và mới, emit socket ngay lập tức
+        // Nếu là tin nhắn của user và mới, emit socket
         if (!existed && msg.from.id !== pageID) {
           io.to(pageID).emit("new_message", {
             userID,

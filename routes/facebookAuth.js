@@ -141,8 +141,21 @@ router.post("/:userID/:pageID/send-message", async (req, res) => {
     const fbData = await fbRes.json();
 
     if (!fbRes.ok) {
-      console.error("Facebook API error:", fbData.error);
-      return res.status(fbRes.status).json({ error: fbData.error.message });
+      const error = fbData.error;
+      console.error("Facebook API error:", error);
+
+      // Kiểm tra lỗi ngoài 24 giờ (error_subcode = 2018278)
+      if (error.code === 10 && error.error_subcode === 2018278) {
+        return res.status(403).json({
+          error: "Tin nhắn này được gửi ngoài khoảng thời gian cho phép (24h).",
+          code: error.code,
+          subcode: error.error_subcode,
+          type: error.type,
+          isOutside24hWindow: true,
+        });
+      }
+
+      return res.status(fbRes.status).json({ error: error.message });
     }
 
     res.json({ success: true, response: fbData });

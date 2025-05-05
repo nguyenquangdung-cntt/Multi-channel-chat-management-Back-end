@@ -7,7 +7,7 @@ const fetch = require("node-fetch");
 // Helper
 const getIO = (req) => req.app.locals.io;
 
-// Save user and pages (giữ nguyên)
+// Save user and pages
 router.post("/", async (req, res) => {
   const { userID, accessToken, userInfo, pages } = req.body;
   try {
@@ -24,19 +24,17 @@ router.post("/", async (req, res) => {
     );
     res.json({ message: "Saved successfully", user });
   } catch (err) {
-    console.error("DB Error:", err);
     res.status(500).json({ error: "Error saving user" });
   }
 });
 
-// Get user by userID (giữ nguyên)
+// Get user by userID
 router.get("/:userID", async (req, res) => {
   try {
     const user = await User.findOne({ userID: req.params.userID });
     if (!user) return res.status(404).json({ message: "User not found" });
     res.json(user);
   } catch (err) {
-    console.error("Error retrieving user:", err);
     res.status(500).json({ error: "Error retrieving user" });
   }
 });
@@ -60,7 +58,6 @@ router.get("/:userID/:pageID/senders", async (req, res) => {
     const convoData = await convoRes.json();
 
     if (convoData.error) {
-      console.error("Conversation API error:", convoData.error);
       return res.status(500).json({ error: convoData.error.message });
     }
 
@@ -72,7 +69,6 @@ router.get("/:userID/:pageID/senders", async (req, res) => {
       const msgData = await msgRes.json();
 
       if (msgData.error) {
-        console.warn(`Error fetching messages for ${convo.id}:`, msgData.error.message);
         continue;
       }
 
@@ -81,14 +77,12 @@ router.get("/:userID/:pageID/senders", async (req, res) => {
       for (const msg of messages) {
         if (!msg.from || !msg.from.id || !msg.message) continue;
 
-        // Kiểm tra có phải mới không (tránh gửi socket 2 lần)
         const existed = await Message.findOne({
           conversationID: convo.id,
           senderID: msg.from.id,
           message: msg.message,
         });
 
-        // Save vào DB
         await Message.findOneAndUpdate(
           {
             conversationID: convo.id,
@@ -106,7 +100,6 @@ router.get("/:userID/:pageID/senders", async (req, res) => {
           { upsert: true, new: true }
         );
 
-        // Nếu là tin nhắn của user và mới, emit socket
         if (!existed && msg.from.id !== pageID) {
           io.to(pageID).emit("new_message", {
             userID,
@@ -125,13 +118,11 @@ router.get("/:userID/:pageID/senders", async (req, res) => {
       });
     }
 
-    // Emit socket sau khi xử lý xong
     io.to(pageID).emit("update_conversations", { userID, pageID });
 
     res.json(result);
 
   } catch (err) {
-    console.error("Error fetching senders:", err);
     res.status(500).json({ error: "Failed to fetch and save senders/messages" });
   }
 });
@@ -168,7 +159,6 @@ router.post("/:userID/:pageID/send-message", async (req, res) => {
 
     if (!fbRes.ok) {
       const error = fbData.error;
-      console.error("Facebook API error:", error);
 
       if (error.code === 10 && error.error_subcode === 2018278) {
         return res.status(403).json({
@@ -183,7 +173,6 @@ router.post("/:userID/:pageID/send-message", async (req, res) => {
       return res.status(fbRes.status).json({ error: error.message });
     }
 
-    // Emit message cho tất cả agent đang theo dõi page này (kể cả chính mình)
     io.to(pageID).emit("new_message", {
       userID,
       pageID,
@@ -196,7 +185,6 @@ router.post("/:userID/:pageID/send-message", async (req, res) => {
     res.json({ success: true, response: fbData });
 
   } catch (err) {
-    console.error("Send message error:", err);
     res.status(500).json({ error: "Failed to send message" });
   }
 });

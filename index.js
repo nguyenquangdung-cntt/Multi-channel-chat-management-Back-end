@@ -32,11 +32,6 @@ io.on("connection", (socket) => {
     console.log(`Socket ${socket.id} joined page ${pageID}`);
   });
 
-  socket.on("new_message", (data) => {
-    console.log(`New message received for page ${data.pageID}:`, data.message);
-    io.to(data.pageID).emit("new_message", data); 
-  });
-
   socket.on("disconnect", () => {
     console.log("Client disconnected:", socket.id);
   });

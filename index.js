@@ -34,8 +34,7 @@ io.on("connection", (socket) => {
 
   socket.on("new_message", (data) => {
     console.log(`New message received for page ${data.pageID}:`, data.message);
-    io.to(data.pageID).emit("new_message", data); // Emit the new message to all clients in the room
-    console.log("Emitted new_message event with data:", data); // Log the emitted data
+    io.to(data.pageID).emit("new_message", data); 
   });
 
   socket.on("disconnect", () => {

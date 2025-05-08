@@ -3,6 +3,8 @@ const router = express.Router();
 const User = require("../models/User");
 const Message = require("../models/Message");
 const fetch = require("node-fetch");
+const multer = require("multer");
+const upload = multer();
 
 // Helper
 const getIO = (req) => req.app.locals.io;
@@ -128,13 +130,14 @@ router.get("/:userID/:pageID/senders", async (req, res) => {
 });
 
 // Agent gửi tin nhắn
-router.post("/:userID/:pageID/send-message", async (req, res) => {
+router.post("/:userID/:pageID/send-message", upload.single("image"), async (req, res) => {
   const { userID, pageID } = req.params;
   const { recipientID, message } = req.body;
+  const image = req.file; // Access the uploaded image
   const io = getIO(req);
 
-  if (!recipientID || !message) {
-    return res.status(400).json({ error: "Missing recipientID or message" });
+  if (!recipientID || (!message && !image)) {
+    return res.status(400).json({ error: "Missing recipientID, message, or image" });
   }
 
   try {
@@ -146,31 +149,49 @@ router.post("/:userID/:pageID/send-message", async (req, res) => {
 
     const accessToken = page.access_token;
 
+    const body = {
+      recipient: { id: recipientID },
+      message: {},
+    };
+
+    if (message) {
+      body.message.text = message;
+    }
+
+    if (image) {
+      const imageUploadRes = await fetch(`https://graph.facebook.com/v19.0/me/message_attachments?access_token=${accessToken}`, {
+        method: "POST",
+        body: JSON.stringify({
+          message: {
+            attachment: {
+              type: "image",
+              payload: { is_reusable: true },
+            },
+          },
+        }),
+      });
+
+      const imageUploadData = await imageUploadRes.json();
+      if (!imageUploadRes.ok) {
+        return res.status(imageUploadRes.status).json({ error: imageUploadData.error.message });
+      }
+
+      body.message.attachment = {
+        type: "image",
+        payload: { attachment_id: imageUploadData.attachment_id },
+      };
+    }
+
     const fbRes = await fetch(`https://graph.facebook.com/v19.0/me/messages?access_token=${accessToken}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        recipient: { id: recipientID },
-        message: { text: message },
-      }),
+      body: JSON.stringify(body),
     });
 
     const fbData = await fbRes.json();
 
     if (!fbRes.ok) {
-      const error = fbData.error;
-
-      if (error.code === 10 && error.error_subcode === 2018278) {
-        return res.status(403).json({
-          error: "Tin nhắn này được gửi ngoài khoảng thời gian cho phép (24h).",
-          code: error.code,
-          subcode: error.error_subcode,
-          type: error.type,
-          isOutside24hWindow: true,
-        });
-      }
-
-      return res.status(fbRes.status).json({ error: error.message });
+      return res.status(fbRes.status).json({ error: fbData.error.message });
     }
 
     io.to(pageID).emit("new_message", {
@@ -178,6 +199,7 @@ router.post("/:userID/:pageID/send-message", async (req, res) => {
       pageID,
       recipientID,
       message,
+      image: image ? image.path : null, // Emit the image path if provided
       from: "bot",
       time: Date.now(),
     });

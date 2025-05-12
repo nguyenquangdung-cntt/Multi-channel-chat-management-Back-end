@@ -84,66 +84,47 @@ router.get("/:userID/:pageID/senders", async (req, res) => {
     const result = [];
 
     for (const convo of convoData.data || []) {
-      // Lấy cả message text và attachments (ảnh)
-      const messagesURL = `https://graph.facebook.com/v19.0/${convo.id}/messages?fields=from,message,attachments&access_token=${accessToken}`;
+      // Lấy cả message text và attachments (ảnh) từ Facebook API
+      const messagesURL = `https://graph.facebook.com/v19.0/${convo.id}/messages?fields=from,message,attachments,created_time&access_token=${accessToken}`;
       const msgRes = await fetch(messagesURL);
       const msgData = await msgRes.json();
       if (msgData.error) {
         continue;
       }
 
-      const messages = msgData.data || [];
-      for (const msg of messages) {
-        if (!msg.from || !msg.from.id) continue;
+      let messages = msgData.data || [];
 
-        // Nếu là ảnh, lấy URL ảnh
-        let imageUrl = null;
-        if (msg.attachments && msg.attachments.data && msg.attachments.data.length > 0) {
-          const attach = msg.attachments.data[0];
-          if (attach.type === "image" && attach.image_data && attach.image_data.url) {
-            imageUrl = attach.image_data.url;
-          }
-        }
+      // Lấy thêm tin nhắn từ DB (bao gồm cả tin nhắn do page gửi, có trường image local)
+      const dbMessages = await Message.find({
+        conversationID: convo.id,
+        pageID,
+        userID,
+      }).sort({ createdAt: -1 }).lean();
 
-        // Kiểm tra đã lưu chưa
-        const existed = await Message.findOne({
-          conversationID: convo.id,
-          senderID: msg.from.id,
-          message: msg.message || "",
-          image: imageUrl || "",
-        });
+      // Map lại format giống Facebook API để merge
+      const dbMsgsMapped = dbMessages.map((m) => ({
+        from: { id: m.senderID, name: m.senderName },
+        message: m.message,
+        attachments: m.image
+          ? { data: [{ type: "image", image_data: { url: m.image } }] }
+          : undefined,
+        created_time: m.createdAt,
+        _from_db: true,
+      }));
 
-        await Message.findOneAndUpdate(
-          {
-            conversationID: convo.id,
-            senderID: msg.from.id,
-            message: msg.message || "",
-            image: imageUrl || "",
-          },
-          {
-            userID,
-            pageID,
-            conversationID: convo.id,
-            senderID: msg.from.id,
-            senderName: msg.from.name || "",
-            message: msg.message || "",
-            image: imageUrl || "",
-          },
-          { upsert: true, new: true }
-        );
-
-        if (!existed && msg.from.id !== pageID) {
-          io.to(pageID).emit("new_message", {
-            userID,
-            pageID,
-            recipientID: msg.from.id,
-            message: msg.message,
-            image: imageUrl,
-            from: "user",
-            time: Date.now(),
-          });
-        }
-      }
+      // Gộp và sắp xếp theo thời gian giảm dần
+      messages = [
+        ...messages,
+        ...dbMsgsMapped.filter(
+          (dbm) =>
+            !messages.some(
+              (fbm) =>
+                fbm.message === dbm.message &&
+                ((fbm.attachments && dbm.attachments && fbm.attachments.data[0].image_data?.url === dbm.attachments.data[0].image_data?.url) ||
+                  (!fbm.attachments && !dbm.attachments))
+            )
+        ),
+      ].sort((a, b) => new Date(b.created_time || 0) - new Date(a.created_time || 0));
 
       result.push({
         conversationID: convo.id,

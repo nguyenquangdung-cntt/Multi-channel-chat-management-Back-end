@@ -142,11 +142,6 @@ router.get("/:userID/:pageID/senders", async (req, res) => {
             from: "user",
             time: Date.now(),
           });
-          // Emit notification event
-          io.to(pageID).emit("notification", {
-            userName: msg.from.name || "Khách hàng",
-            message: msg.message ? msg.message : (imageUrl ? "Đã gửi một hình ảnh" : "Có tin nhắn mới"),
-          });
         }
       }
 

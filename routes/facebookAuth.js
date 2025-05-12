@@ -162,7 +162,7 @@ router.get("/:userID/:pageID/senders", async (req, res) => {
 router.post("/:userID/:pageID/send-message", upload.single("image"), async (req, res) => {
   const { userID, pageID } = req.params;
   const { recipientID, message } = req.body;
-  const image = req.file; // Access the uploaded image
+  const image = req.file;
   const io = getIO(req);
 
   if (!recipientID || (!message && !image)) {
@@ -177,6 +177,28 @@ router.post("/:userID/:pageID/send-message", upload.single("image"), async (req,
     if (!page) return res.status(404).json({ error: "Page not found in user's pages" });
 
     const accessToken = page.access_token;
+
+    // Lấy conversationID giữa page và recipientID
+    let conversationID = null;
+    const conversationURL = `https://graph.facebook.com/v19.0/${pageID}/conversations?access_token=${accessToken}`;
+    const convoRes = await fetch(conversationURL);
+    const convoData = await convoRes.json();
+    if (convoData && convoData.data && convoData.data.length > 0) {
+      for (const convo of convoData.data) {
+        // Lấy participants của conversation
+        const participantsURL = `https://graph.facebook.com/v19.0/${convo.id}/participants?access_token=${accessToken}`;
+        const partRes = await fetch(participantsURL);
+        const partData = await partRes.json();
+        if (
+          partData &&
+          partData.data &&
+          partData.data.some((p) => p.id === recipientID)
+        ) {
+          conversationID = convo.id;
+          break;
+        }
+      }
+    }
 
     const body = {
       recipient: { id: recipientID },
@@ -228,11 +250,11 @@ router.post("/:userID/:pageID/send-message", upload.single("image"), async (req,
       return res.status(fbRes.status).json({ error: fbData.error.message });
     }
 
-    // Lưu vào DB
+    // Lưu vào DB với conversationID đúng
     await Message.create({
       userID,
       pageID,
-      conversationID: null,
+      conversationID: conversationID,
       senderID: pageID,
       senderName: "Agent",
       message: message || "",

@@ -13,6 +13,10 @@ const io = new Server(server, { cors: { origin: "*" } });
 app.use(cors());
 app.use(express.json());
 
+// Serve static files for uploaded images
+const path = require("path");
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+
 // Kết nối MongoDB
 mongoose.connect(process.env.MONGODB_URI)
   .then(() => console.log("✅ MongoDB connected"))
